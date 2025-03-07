@@ -21,3 +21,9 @@ logs
 
 # Data folder
 bookcorpus_data/
+
+output/
+
+myhostfile
+
+ds_config.json

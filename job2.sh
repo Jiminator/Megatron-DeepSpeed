@@ -1,13 +1,39 @@
 #!/bin/bash
+#SBATCH --account=bcrn-delta-gpu
+#SBATCH --job-name=megatron-deepspeed
+#SBATCH --partition=gpuA40x4
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH --cpus-per-task=8
+#SBATCH --time=00:05:00
+#SBATCH --output=output/output_%j.out
+#SBATCH --error=output/output_%j.err
+
 set -ex
+
+export LOGLEVEL=INFO
+
+source ~/miniconda3/etc/profile.d/conda.sh 
+conda activate llm
+echo "START TIME: $(date)"
+
+export NCCL_DEBUG=INFO
+export NCCL_SOCKET_IFNAME=hsn
+module load nccl # loads the nccl built with the AWS nccl plugin for Slingshot11
+module list
+echo "Job is starting on `hostname`"
 
 BASE_PATH=../oscar
 DATA_PATH=../meg-gpt2_text_document
 DS_CONFIG=ds_config.json
 
 WORLD_SIZE=$SLURM_NTASKS
+# Enable DeepSpeed
+USE_DEEPSPEED=1
 TP=2
 PP=1
+ZERO_STAGE=0
 DP=$((WORLD_SIZE / (TP * PP)))
 
 NLAYERS=24
@@ -15,9 +41,8 @@ HIDDEN=512
 
 GLOBAL_BATCH=64
 MICRO_BATCH=64
-ZERO_STAGE=0
 
-OUTPUT_DIR=output/PP${PP}_TP${TP}_DP${DP}_bs${MICRO_BATCH}
+OUTPUT_DIR=output/${SLURM_JOB_ID}/PP${PP}_TP${TP}_DP${DP}_bs${MICRO_BATCH}
 #OUTPUT_DIR=baseline_nl${NLAYERS}_hs${HIDDEN}_gb${GLOBAL_BATCH}_mb${MICRO_BATCH}
 mkdir -p $OUTPUT_DIR
 
@@ -47,25 +72,14 @@ cat <<EOT > $DS_CONFIG
 EOT
 
 export NCCL_DEBUG=warn 
-export MASTER_IP=$2
-# export NCCL_P2P_LEVEL=NVL
 
-ds_args=""
-ds_args=" --deepspeed ${ds_args}"
-# ds_args=" --no-pipeline-parallel ${ds_args}"
-ds_args=" --deepspeed_config=$DS_CONFIG ${ds_args}"
-ds_args=" --zero-stage=$ZERO_STAGE ${ds_args}"
-# ds_args=" --deepspeed-activation-checkpointing ${ds_args}"
+GPUS_PER_NODE=$SLURM_GPUS_PER_NODE
+NNODES=$SLURM_NNODES
 
+MASTER_ADDR=$(scontrol show hostnames $SLURM_JOB_NODELIST | head -n 1)
+MASTER_PORT=29500
 
-
-deepspeed \
-    --hostfile=./myhostfile \
-    --no_ssh \
-    --node_rank=$1 \
-    --master_addr=${MASTER_IP} \
-    --master_port=9875 \
-    pretrain_gpt.py \
+options=" \
     --tensor-model-parallel-size $TP \
     --pipeline-model-parallel-size $PP \
     --num-layers $NLAYERS \
@@ -94,5 +108,32 @@ deepspeed \
     --adam-beta2 0.95 \
     --init-method-std 0.006 \
     --tensorboard-dir $OUTPUT_DIR \
-    $ds_args \
-    --exit-interval 5000 | tee ${OUTPUT_DIR}/output.log
+    --exit-interval 5000 \
+    --distributed-backend nccl
+    "
+
+# DeepSpeed Options
+if [[ ${USE_DEEPSPEED} -eq 1 ]]; then
+	echo "Using DeepSpeed"
+	options="${options} \
+		--deepspeed \
+		--deepspeed_config=${DS_CONFIG} \
+		--zero-stage=${ZERO_STAGE} \
+		"
+fi
+
+CMD="pretrain_gpt.py ${options}"
+echo $CMD
+
+LAUNCHER="torchrun \
+	--nproc_per_node ${GPUS_PER_NODE} \
+	--nnodes ${NNODES} \
+ 	--rdzv_id=$RANDOM \
+	--rdzv_backend=c10d \
+	--rdzv_endpoint=${MASTER_ADDR}:${MASTER_PORT} \
+	"
+echo "Options passed: ${options}"
+srun  bash -c "${LAUNCHER} ${CMD}"
+
+
+conda deactivate

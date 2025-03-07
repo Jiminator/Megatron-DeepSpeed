@@ -298,10 +298,10 @@ class CoreAttention(MegatronModule):
                        key_layer.size(0))
 
         # [sq, b, np, hn] -> [sq, b * np, hn]
-        query_layer = query_layer.view(output_size[2],
+        query_layer = query_layer.reshape(output_size[2],
                                        output_size[0] * output_size[1], -1)
         # [sk, b, np, hn] -> [sk, b * np, hn]
-        key_layer = key_layer.view(output_size[3],
+        key_layer = key_layer.reshape(output_size[3],
                                    output_size[0] * output_size[1], -1)
 
         # preallocting input tensor: [b * np, sq, sk]
@@ -349,7 +349,7 @@ class CoreAttention(MegatronModule):
                        value_layer.size(3))
 
         # change view [sk, b * np, hn]
-        value_layer = value_layer.view(value_layer.size(0),
+        value_layer = value_layer.reshape(value_layer.size(0),
                                        output_size[0] * output_size[1], -1)
 
         # change view [b * np, sq, sk]
@@ -1332,6 +1332,13 @@ class ParallelTransformerLayer(MegatronModule):
 
         # Self attention.
         try:
+            # attention_output, attention_bias = \
+            #     self.self_attention(
+            #         layernorm_output,
+            #         attention_mask,
+            #         inference_params=inference_params,
+            #         rotary_pos_emb=rotary_pos_emb,
+            #         cpu_offloading=self.ds_sequence_parallel_fpdt_offloading)
             attention_output, attention_bias = \
                 self.self_attention(
                     layernorm_output,

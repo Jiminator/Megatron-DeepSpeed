@@ -56,7 +56,7 @@ def model_provider(pre_process=True, post_process=True):
             )
             # This is a hack to give us a reference to get_batch_pipe from within training.py
             # We need to call model.set_batch_fn after deepspeed.initialize
-            model._megatron_batch_fn = get_batch_pipe
+            model._megatron_batch_fn = get_batch_pipe_with_timer
 
             # Predompute the attention mask and store it in args. This avoids having to
             # pipeline it as an activation during training. The mask is constant, and thus
@@ -147,6 +147,13 @@ def get_batch(data_iterator):
         labels = labels[:, sub_seq_start:sub_seq_end]
 
     return tokens, labels, loss_mask, attention_mask, position_ids
+
+def get_batch_pipe_with_timer(data):
+    timers = get_timers()
+    timers('batch-generator', log_level=0).start()
+    (tokens, position_ids, attention_mask), (labels, loss_mask) = get_batch_pipe(data)
+    timers('batch-generator').stop()
+    return (tokens, position_ids, attention_mask), (labels, loss_mask)
 
 def data_post_process(data, data_sampler_state_dict):
     args = get_args()
@@ -264,7 +271,8 @@ def forward_step(data_iterator, model):
     timers = get_timers()
 
     # Get the batch.
-    timers('batch-generator', log_level=2).start()
+    # timers('batch-generator', log_level=2).start()
+    timers('batch-generator', log_level=0).start()
     tokens, labels, loss_mask, attention_mask, position_ids = get_batch(
         data_iterator)
     timers('batch-generator').stop()

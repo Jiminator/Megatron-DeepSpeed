@@ -236,7 +236,7 @@ def pretrain(train_valid_test_dataset_provider,
                             model, optimizer, opt_param_scheduler,
                             train_data_iterator, valid_data_iterator,
                             process_non_loss_data_func)
-
+        # timers.log(['batch-generator'], reset=False)
         print_datetime('after training is done')
         # Clean the model
         if args.compression_training:
@@ -674,13 +674,39 @@ def train_step(forward_step_func, data_iterator,
     if args.deepspeed and args.ds_pipeline_enabled:
         num_zeros_in_grad = 0
         assert isinstance(model[0], deepspeed.PipelineEngine)
+        # flops_profiler_active = model[0].flops_profiler_enabled() and model[0].global_steps == model[0].flops_profiler_profile_step() and model[0].global_rank == 0
+        # if flops_profiler_active:
+        #     # model[0].flops_profiler.stop_profile()
+        #     # model[0].flops_profiler.start_profile(ignore_list=None)
+        #     print(model[0].flops_profiler.started)
+        #     fwd_latency = model[0].flops_profiler.ds_engine.timers(FORWARD_GLOBAL_TIMER).elapsed(False) / 1000.0
+        #     print(fwd_latency)
+        #     print("DO I GET HERE")
         loss = model[0].train_batch(data_iter=data_iterator)
+        # fwd_latency = model[0].flops_profiler.ds_engine.timers(FORWARD_GLOBAL_TIMER).elapsed(False) / 1000.0
+        # print(fwd_latency)
+        # print("DO I GET HERE")
         additional_losses = model[0].get_additional_losses()
         loss_key = 'lm loss' if additional_losses is None else 'loss'  # use "lm loss" for backward compatibility
         loss_dict = OrderedDict({loss_key: loss})
         if additional_losses is not None:
             loss_dict.update(additional_losses)
         grad_norm = model[0].get_global_grad_norm()
+        # if flops_profiler_active:
+        #     print("DO I GET HERE")
+        #     print(model[0].flops_profiler_output_file())
+        #     print(model[0].flops_profiler.started)
+        #     fwd_latency = model[0].flops_profiler.ds_engine.timers(FORWARD_GLOBAL_TIMER).elapsed(False) / 1000.0
+        #     print(fwd_latency)
+        #     # model[0].flops_profiler.print_model_profile(
+        #     #         profile_step=model[0].global_steps,
+        #     #         module_depth=model[0].flops_profiler_module_depth(),
+        #     #         top_modules=model[0].flops_profiler_top_modules(),
+        #     #         detailed=model[0].flops_profiler_detailed(),
+        #     #         output_file=model[0].flops_profiler_output_file(),
+        #     #     )
+        #     # model[0].flops_profiler.stop_profile()
+        #     print("DO I GET HERE")
         update_successful = model[0].was_step_applied()
         skipped_iter = 0 if update_successful else 1
         return loss_dict, skipped_iter, grad_norm, num_zeros_in_grad
